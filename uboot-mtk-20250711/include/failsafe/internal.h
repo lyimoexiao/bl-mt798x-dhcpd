@@ -191,7 +191,7 @@ void ubi_backup_handler(enum httpd_uri_handler_status status,
 /* ------------------------------------------------------------------ */
 
 /* Always compiled */
-void misc_register_handlers(struct httpd_instance *inst);
+void misc_register_handlers(struct httpd_instance *inst, bool legacy_ui);
 void upgrade_register_handlers(struct httpd_instance *inst);
 
 /* Conditionally compiled */

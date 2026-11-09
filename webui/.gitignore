@@ -1,0 +1,4 @@
+node_modules/
+dist/
+dist-no-i18n/
+screenshots/

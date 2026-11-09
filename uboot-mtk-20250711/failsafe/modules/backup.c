@@ -380,11 +380,13 @@ void backupinfo_handler(enum httpd_uri_handler_status status,
 
 			json_escape(esc_name, sizeof(esc_name), mtd->name);
 			len = buf_appendf(buf, left, len,
-				"%s{\"name\":\"%s\",\"size\":%llu,\"master\":%s}",
+				"%s{\"name\":\"%s\",\"size\":%llu,\"master\":%s,"
+				"\"page_size\":%u,\"oob_size\":%u,\"erase_size\":%u}",
 				first ? "" : ",",
 				esc_name,
 				(unsigned long long)mtd->size,
-				mtd->parent ? "false" : "true");
+				mtd->parent ? "false" : "true",
+				mtd->writesize, mtd->oobsize, mtd->erasesize);
 
 			first = false;
 			put_mtd_device(mtd);

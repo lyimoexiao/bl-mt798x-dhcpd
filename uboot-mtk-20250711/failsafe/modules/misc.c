@@ -539,12 +539,27 @@ void index_handler(enum httpd_uri_handler_status status,
 	}
 }
 
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+static void legacy_index_handler(enum httpd_uri_handler_status status,
+				 struct httpd_request *request,
+				 struct httpd_response *response)
+{
+	if (status == HTTP_CB_NEW &&
+	    failsafe_output_file(response, "legacy-index.html", "text/html"))
+		not_found_handler(status, request, response);
+}
+#endif
+
 void style_handler(enum httpd_uri_handler_status status,
 			  struct httpd_request *request,
 			  struct httpd_response *response)
 {
 	if (status == HTTP_CB_NEW) {
-		if (failsafe_output_file(response, "style.css", "text/css")) {
+		const char *file = request && request->urih &&
+			!strcmp(request->urih->uri, "/app.css") ?
+			"app.css" : "style.css";
+
+		if (failsafe_output_file(response, file, "text/css")) {
 			not_found_handler(status, request, response);
 			return;
 		}
@@ -559,6 +574,7 @@ static const char *select_js_file(const char *uri)
 {
 	static const char *allowed[] = {
 		"main.js",
+		"app.js",
 		"i18n.js",
 		"theme.js",
 		"backup_js.js",
@@ -637,13 +653,20 @@ void html_handler(enum httpd_uri_handler_status status,
 /*  Public registration function                                       */
 /* ------------------------------------------------------------------ */
 
-void misc_register_handlers(struct httpd_instance *inst)
+void misc_register_handlers(struct httpd_instance *inst, bool legacy_ui)
 {
-	httpd_register_uri_handler(inst, "/", &index_handler, NULL);
+	httpd_uri_handler_cb entry = &index_handler;
+
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+	if (legacy_ui)
+		entry = &legacy_index_handler;
+#endif
+	httpd_register_uri_handler(inst, "/", entry, NULL);
+	httpd_register_uri_handler(inst, "/index.html", entry, NULL);
 	httpd_register_uri_handler(inst, "/bl2.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/booting.html", &html_handler, NULL);
-	httpd_register_uri_handler(inst, "/cgi-bin/luci", &index_handler, NULL);
-	httpd_register_uri_handler(inst, "/cgi-bin/luci/", &index_handler, NULL);
+	httpd_register_uri_handler(inst, "/cgi-bin/luci", entry, NULL);
+	httpd_register_uri_handler(inst, "/cgi-bin/luci/", entry, NULL);
 	httpd_register_uri_handler(inst, "/fail.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/flashing.html", &html_handler, NULL);
 #ifdef CONFIG_WEBUI_FAILSAFE_GPT
@@ -651,6 +674,10 @@ void misc_register_handlers(struct httpd_instance *inst)
 #endif
 	httpd_register_uri_handler(inst, "/initramfs.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/main.js", &js_handler, NULL);
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+	httpd_register_uri_handler(inst, "/app.js", &js_handler, NULL);
+	httpd_register_uri_handler(inst, "/app.css", &style_handler, NULL);
+#endif
 	httpd_register_uri_handler(inst, "/style.css", &style_handler, NULL);
 	httpd_register_uri_handler(inst, "/uboot.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/version", &version_handler, NULL);

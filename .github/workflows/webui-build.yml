@@ -1,0 +1,133 @@
+name: Dual WebUI Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'webui/**'
+      - 'uboot-mtk-20250711/failsafe/**'
+      - 'uboot-mtk-20250711/include/failsafe/**'
+      - '.github/workflows/webui-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Install and test frontend
+        working-directory: webui
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npx playwright install --with-deps chromium
+          npm run dev > /tmp/webui-vite.log 2>&1 &
+          VITE_PID=$!
+          trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://localhost:5173/ >/dev/null && break || sleep 1; done
+          node scripts/browser-check.mjs
+          node scripts/maintenance-check.mjs
+          node scripts/transfer-check.mjs
+          node scripts/parity-check.mjs
+          npm run embed
+      - name: Upload generated frontend and screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-resources
+          path: |
+            uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/
+            webui/screenshots/
+
+  firmware:
+    needs: frontend
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: cudy_tr3000-v1
+            raw: '1'
+            ubi: '1'
+            i18n: 'y'
+          - board: cudy_tr3000-v1
+            raw: '1'
+            ubi: '1'
+            i18n: 'n'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install firmware build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y $(<depends/ubuntu-22.04)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: webui-resources
+          path: generated
+      - name: Use tested frontend resources
+        run: |
+          cp generated/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/* uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/
+          if [ '${{ matrix.i18n }}' = n ]; then
+            echo '# CONFIG_WEBUI_FAILSAFE_I18N is not set' >> 'uboot-mtk-20250711/configs/mt7981_${{ matrix.board }}_defconfig'
+          fi
+      - name: Build FIP with new UI on 80 and old UI on 8080
+        env:
+          BOARD: ${{ matrix.board }}
+          SOC: mt7981
+          VERSION: '2025'
+          FSTHEME: bootstrap
+          NAND_RAW: ${{ matrix.raw }}
+          UBIMNG: ${{ matrix.ubi }}
+          FIP_COMPRESS: '1'
+          SILENT: Y
+        run: |
+          set -euo pipefail
+          ./build.sh 2>&1 | tee firmware-build.log
+          test -s uboot-mtk-20250711/u-boot.bin
+          find output -name 'fip-*.bin' -type f | grep .
+      - name: Verify both embedded entries and record sizes
+        run: |
+          set -euo pipefail
+          aarch64-linux-gnu-nm uboot-mtk-20250711/u-boot > symbols.txt
+          grep 'fsdata_legacy_index_html' symbols.txt
+          grep 'fsdata_index_html' symbols.txt
+          grep 'fsdata_app_js' symbols.txt
+          grep 'fsdata_app_css' symbols.txt
+          if [ '${{ matrix.i18n }}' = y ]; then
+            grep '^CONFIG_WEBUI_FAILSAFE_I18N=y' uboot-mtk-20250711/.config
+          else
+            grep '^# CONFIG_WEBUI_FAILSAFE_I18N is not set' uboot-mtk-20250711/.config
+          fi
+          aarch64-linux-gnu-size uboot-mtk-20250711/u-boot | tee firmware-size.txt
+          sha256sum output/*bin | tee SHA256SUMS
+          {
+            echo '### ${{ matrix.board }} / i18n=${{ matrix.i18n }}'
+            echo 'New UI: http://<device-ip>/ · Legacy UI: http://<device-ip>:8080/'
+            echo '```'
+            cat firmware-size.txt SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload firmware and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-webui-${{ matrix.board }}-i18n-${{ matrix.i18n }}
+          path: |
+            output/
+            firmware-build.log
+            firmware-size.txt
+            SHA256SUMS
+            uboot-mtk-20250711/.config
+            uboot-mtk-20250711/u-boot.map

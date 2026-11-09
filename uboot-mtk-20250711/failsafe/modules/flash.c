@@ -385,6 +385,9 @@ static int flash_parse_backup_filename(const char *filename,
 
 	memcpy(tmp, stype, seg_len);
 	tmp[seg_len] = '\0';
+	/* RAW backup suffix is metadata, not a partition named "oob". */
+	if (seg_len > 4 && !strcmp(tmp + seg_len - 4, "_oob"))
+		tmp[seg_len - 4] = '\0';
 
 	{
 		char *last = strrchr(tmp, '_');
@@ -521,6 +524,15 @@ void flash_handler(enum httpd_uri_handler_status status,
 		if (ret)
 			goto bad_target;
 
+#ifdef CONFIG_WEBUI_FAILSAFE_NAND_RAW
+		if (raw_mode && tgt.src == FAILSAFE_SRC_MTD) {
+			if (!nand_raw_is_nand(tgt.mtd) ||
+			    read_start + read_len > nand_raw_total_size(tgt.mtd)) {
+				flash_close_target(&tgt);
+				goto bad_range;
+			}
+		} else
+#endif
 		if (read_start + read_len > tgt.size) {
 			flash_close_target(&tgt);
 			goto bad_range;
@@ -532,7 +544,8 @@ void flash_handler(enum httpd_uri_handler_status status,
 			u64 first_page, pages_to_read;
 			size_t actual;
 
-			if (!rps || !nand_raw_is_nand(tgt.mtd)) {
+			if (!rps || !nand_raw_is_nand(tgt.mtd) ||
+			    read_start % rps || read_len % rps) {
 				flash_close_target(&tgt);
 				goto bad_req;
 			}
@@ -739,7 +752,7 @@ void flash_handler(enum httpd_uri_handler_status status,
 	}
 
 	if (!strcmp(op, "restore")) {
-		struct httpd_form_value *fw, *startv, *endv;
+		struct httpd_form_value *fw, *startv, *endv, *rawv;
 		struct flash_target tgt;
 		char storage_from_name[16] = "";
 		char target_from_name[64] = "";
@@ -789,6 +802,15 @@ void flash_handler(enum httpd_uri_handler_status status,
 				goto bad_range;
 		}
 
+		rawv = httpd_request_find_value(request, "raw");
+		if (rawv && rawv->data && !strcmp(rawv->data, "1")) {
+#ifdef CONFIG_WEBUI_FAILSAFE_NAND_RAW
+			raw_restore = true;
+#else
+			goto bad_req;
+#endif
+		}
+
 		len = fw->size;
 		if (end <= start || (u64)len != (end - start))
 			goto bad_range;
@@ -797,6 +819,27 @@ void flash_handler(enum httpd_uri_handler_status status,
 		if (ret)
 			goto bad_target;
 
+#ifdef CONFIG_WEBUI_FAILSAFE_NAND_RAW
+		if (raw_restore) {
+			size_t rps;
+			u64 block_bytes;
+
+			if (tgt.src != FAILSAFE_SRC_MTD || !nand_raw_is_nand(tgt.mtd)) {
+				flash_close_target(&tgt);
+				goto bad_range;
+			}
+			rps = nand_raw_page_size(tgt.mtd);
+			block_bytes = tgt.mtd->writesize ?
+				(u64)(tgt.mtd->erasesize / tgt.mtd->writesize) * rps : 0;
+			/* Each chunk erases its covered blocks. Require whole raw erase
+			 * blocks so a subsequent chunk cannot erase earlier writes. */
+			if (!rps || !block_bytes || start % block_bytes ||
+			    len % block_bytes || end > nand_raw_total_size(tgt.mtd)) {
+				flash_close_target(&tgt);
+				goto bad_range;
+			}
+		} else
+#endif
 		if (end > tgt.size) {
 			flash_close_target(&tgt);
 			goto bad_range;

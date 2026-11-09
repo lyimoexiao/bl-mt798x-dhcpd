@@ -121,6 +121,17 @@ obj-y += theme.o
 FILE_theme.o := .min/theme.js.gz
 FSPATH_theme.o := theme.js
 
+# Vue / Element Plus entry. Generated resources are checked in; firmware
+# compilation does not require the frontend toolchain. Regenerate with:
+#   cd webui && npm ci && npm run embed
+obj-y += app_js.o app_css.o legacy_index.o
+FILE_legacy_index.o := .min/legacy_index.html.gz
+FSPATH_legacy_index.o := legacy-index.html
+FILE_app_js.o := .min/app.js.gz
+FSPATH_app_js.o := app.js
+FILE_app_css.o := .min/app.css.gz
+FSPATH_app_css.o := app.css
+
 # customized build rules
 strip_path = $(subst /,_,$(subst -,_,$(subst .,_,$(1))))
 WEBUI_FAILSAFE_JS_MINIFY_SCRIPT = $(srctree)/$(src)/../minify-js.cjs
@@ -154,6 +165,26 @@ cmd_as_o_html = $(CC) $(a_flags) -c -o $@ \
 		-DUBOOT_LIST_NAME="fsdata_ulist_$(call strip_path,$(FSPATH_$(@F)))" \
 		$(srctree)/$(src)/embed.S
 
+# Vite already minifies the Vue bundle. Do not pass modern ESM through
+# the legacy JS minifier. Keep the existing pages/assets for advanced tools.
+$(obj)/.min/index.html: $(src)/vue/index.html $(WEBUI_FAILSAFE_HTML_MINIFY_SCRIPT) FORCE
+	$(call cmd,force_checksrc)
+	$(call if_changed,minify_html)
+
+# Keep the original entry separately: / on port 8080 serves this page.
+$(obj)/.min/legacy_index.html: $(src)/index.html $(WEBUI_FAILSAFE_HTML_MINIFY_SCRIPT) FORCE
+	$(call cmd,force_checksrc)
+	$(call if_changed,minify_html)
+
+WEBUI_VUE_JS = $(if $(filter y,$(CONFIG_WEBUI_FAILSAFE_I18N)),app.js,app-no-i18n.js)
+$(obj)/.min/app.js.gz: $(src)/vue/$(WEBUI_VUE_JS) $(WEBUI_FAILSAFE_GZIP_SCRIPT) FORCE
+	@mkdir -p $(dir $@)
+	$(call if_changed,fsdata_gzembed)
+
+$(obj)/.min/app.css.gz: $(src)/vue/app.css $(WEBUI_FAILSAFE_GZIP_SCRIPT) FORCE
+	@mkdir -p $(dir $@)
+	$(call if_changed,fsdata_gzembed)
+
 # Step 1: Minify source files
 $(obj)/.min/%.html: $(src)/%.html $(WEBUI_FAILSAFE_HTML_MINIFY_SCRIPT) FORCE
 	$(call cmd,force_checksrc)
@@ -181,6 +212,13 @@ $(obj)/.min/%.svg.gz: $(src)/%.svg $(WEBUI_FAILSAFE_GZIP_SCRIPT) FORCE
 	$(call if_changed,fsdata_gzembed)
 
 # Step 3: Embed GZip-compressed files into object files
+# Object stems differ from Vite's stable resource names.
+$(obj)/app_js.o: $(obj)/.min/app.js.gz FORCE
+	$(call if_changed_dep,as_o_html)
+
+$(obj)/app_css.o: $(obj)/.min/app.css.gz FORCE
+	$(call if_changed_dep,as_o_html)
+
 $(obj)/%.o: $(obj)/.min/%.html.gz FORCE
 	$(call if_changed_dep,as_o_html)
 

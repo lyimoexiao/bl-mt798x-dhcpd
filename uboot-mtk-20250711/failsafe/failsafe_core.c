@@ -102,22 +102,11 @@ void failsafe_notify_network_cmd_done(void)
 /*  Main entry: start_web_failsafe()                                   */
 /* ------------------------------------------------------------------ */
 
-int start_web_failsafe(void)
+static void failsafe_register_handlers(struct httpd_instance *inst,
+				       bool legacy_ui)
 {
-	struct httpd_instance *inst;
-
-	inst = httpd_find_instance(80);
-	if (inst)
-		httpd_free_instance(inst);
-
-	inst = httpd_create_instance(80);
-	if (!inst) {
-		debug("Error: failed to create HTTP instance on port 80\n");
-		return -1;
-	}
-
-	/* Register handlers from each module */
-	misc_register_handlers(inst);
+	/* Both ports use the same APIs and compile-time capability checks. */
+	misc_register_handlers(inst, legacy_ui);
 	upgrade_register_handlers(inst);
 #ifdef CONFIG_WEBUI_FAILSAFE_BACKUP
 	backup_register_handlers(inst);
@@ -136,6 +125,33 @@ int start_web_failsafe(void)
 #endif
 #ifdef CONFIG_WEBUI_FAILSAFE_CONSOLE
 	console_register_handlers(inst);
+#endif
+}
+
+int start_web_failsafe(void)
+{
+	struct httpd_instance *inst;
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+	struct httpd_instance *legacy_inst;
+#endif
+
+	httpd_free_instance_by_port(80);
+	inst = httpd_create_instance(80);
+	if (!inst) {
+		debug("Error: failed to create HTTP instance on port 80\n");
+		return -1;
+	}
+	failsafe_register_handlers(inst, false);
+
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+	httpd_free_instance_by_port(8080);
+	legacy_inst = httpd_create_instance(8080);
+	if (!legacy_inst) {
+		printf("Error: failed to create legacy WebUI on port 8080\n");
+		httpd_free_instance(inst);
+		return -1;
+	}
+	failsafe_register_handlers(legacy_inst, true);
 #endif
 
 #ifdef CONFIG_MTK_TELNETD
@@ -159,6 +175,11 @@ int start_web_failsafe(void)
 		printf("URL: http://%u.%u.%u.%u/\n",
 		       (ip >> 24) & 0xff, (ip >> 16) & 0xff,
 		       (ip >> 8) & 0xff, ip & 0xff);
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+		printf("Legacy UI: http://%u.%u.%u.%u:8080/\n",
+		       (ip >> 24) & 0xff, (ip >> 16) & 0xff,
+		       (ip >> 8) & 0xff, ip & 0xff);
+#endif
 		printf("Press Ctrl+C to exit\n");
 	}
 
