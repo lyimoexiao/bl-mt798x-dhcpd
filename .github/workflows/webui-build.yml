@@ -83,7 +83,7 @@ jobs:
           path: generated
       - name: Use tested frontend resources
         run: |
-          cp generated/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/* uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/
+          cp -a generated/uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/. uboot-mtk-20250711/failsafe/embedded/fsdata-bootstrap/vue/
           if [ '${{ matrix.i18n }}' = n ]; then
             echo '# CONFIG_WEBUI_FAILSAFE_I18N is not set' >> 'uboot-mtk-20250711/configs/mt7981_${{ matrix.board }}_defconfig'
           fi
