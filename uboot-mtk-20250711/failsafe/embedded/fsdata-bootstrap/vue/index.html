@@ -11,6 +11,13 @@
     <link rel="stylesheet" crossorigin href="/app.css">
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main style="max-width:560px;margin:12vh auto;padding:24px;font:16px/1.8 system-ui,sans-serif;color:#17243b" role="status">
+        <h1 style="font-size:24px">正在加载恢复界面…</h1>
+        <p>Loading recovery console…</p>
+        <p>长时间未完成时，可先使用 <a id="legacy-ui" href="http://192.168.1.1:8080/">旧版 WebUI / Legacy UI</a>。</p>
+      </main>
+    </div>
+    <script>document.getElementById('legacy-ui').href = location.protocol + '//' + location.hostname + ':8080/'</script>
   </body>
 </html>

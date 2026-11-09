@@ -653,11 +653,29 @@ void html_handler(enum httpd_uri_handler_status status,
 /*  Public registration function                                       */
 /* ------------------------------------------------------------------ */
 
+#ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+#include "../embedded/fsdata-bootstrap/vue/assets.h"
+
+static void vue_lazy_asset_handler(enum httpd_uri_handler_status status,
+				   struct httpd_request *request,
+				   struct httpd_response *response)
+{
+	if (status == HTTP_CB_NEW &&
+	    failsafe_output_file(response, request->urih->uri + 1, "text/javascript"))
+		not_found_handler(status, request, response);
+}
+#endif
+
 void misc_register_handlers(struct httpd_instance *inst, bool legacy_ui)
 {
 	httpd_uri_handler_cb entry = &index_handler;
 
 #ifdef CONFIG_WEBUI_FAILSAFE_UI_BOOTSTRAP
+	int asset;
+
+	for (asset = 0; vue_lazy_assets[asset]; asset++)
+		httpd_register_uri_handler(inst, vue_lazy_assets[asset],
+			&vue_lazy_asset_handler, NULL);
 	if (legacy_ui)
 		entry = &legacy_index_handler;
 #endif

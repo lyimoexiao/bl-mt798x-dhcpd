@@ -132,6 +132,9 @@ FSPATH_app_js.o := app.js
 FILE_app_css.o := .min/app.css.gz
 FSPATH_app_css.o := app.css
 
+# Lazy maintenance chunks and the exact selected i18n variant.
+include $(srctree)/$(src)/vue/assets.mk
+
 # customized build rules
 strip_path = $(subst /,_,$(subst -,_,$(subst .,_,$(1))))
 WEBUI_FAILSAFE_JS_MINIFY_SCRIPT = $(srctree)/$(src)/../minify-js.cjs
@@ -182,6 +185,10 @@ $(obj)/.min/app.js.gz: $(src)/vue/$(WEBUI_VUE_JS) $(WEBUI_FAILSAFE_GZIP_SCRIPT) 
 	$(call if_changed,fsdata_gzembed)
 
 $(obj)/.min/app.css.gz: $(src)/vue/app.css $(WEBUI_FAILSAFE_GZIP_SCRIPT) FORCE
+	@mkdir -p $(dir $@)
+	$(call if_changed,fsdata_gzembed)
+
+$(obj)/.min/vue/%.gz: $(src)/vue/% $(WEBUI_FAILSAFE_GZIP_SCRIPT) FORCE
 	@mkdir -p $(dir $@)
 	$(call if_changed,fsdata_gzembed)
 

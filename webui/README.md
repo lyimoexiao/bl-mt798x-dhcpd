@@ -1,5 +1,7 @@
 # MT798x WebUI
 
+静态资源停滞的真机抓包、修复原理和验证边界见 [静态传输说明](docs/static-transfer.md)。维护页面按需加载，`embed` 自动生成 lazy chunk 的固件资源和路由清单。
+
 Vue 3 + TypeScript + Vue Router + vue-i18n + Element Plus + UnoCSS。默认标题为「固件更新」。图标通过 UnoCSS presetIcons 从本地 Iconify Lucide 集合生成，无 CDN 请求。
 
 ## 开发
@@ -79,6 +81,9 @@ node scripts/browser-check.mjs
 node scripts/maintenance-check.mjs
 node scripts/transfer-check.mjs
 node scripts/parity-check.mjs
+# npm run embed 后验证生产包按需加载
+node scripts/lazy-build-check.mjs
+cc -Wall -Wextra -Werror tests/tcp-policy.c -o /tmp/tcp-policy && /tmp/tcp-policy
 ```
 
 检查中文标题、语言切换及持久化、320/375/768/1024/1440/1920px 宽度、图标 CSS mask、路由、移动导航、上传校验展示、演示模式禁止刷写、深色模式和运行时错误。截图写入 `screenshots/`。

@@ -1,0 +1,1 @@
+function c(e,t){const n=URL.createObjectURL(e),o=document.createElement("a");o.href=n,o.download=t.replace(/[/\\\x00-\x1f]/g,"_"),o.click(),setTimeout(()=>URL.revokeObjectURL(n),1e3)}function a(e,t){return/filename\s*=\s*"([^"]+)"/i.exec(e.headers.get("Content-Disposition")||"")?.[1]||t}export{a as d,c as s};

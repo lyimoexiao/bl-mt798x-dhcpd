@@ -23,6 +23,7 @@
 #undef sp /* MIPS $29 register macro collides with struct field */
 #endif
 #include "mtk_tcp.h"
+#include "mtk_tcp_policy.h"
 #include "arp.h"
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -113,6 +114,7 @@ static int mtk_tcp_send_packet_ctrl(struct mtk_tcp_conn *c, u16 flags);
 static void mtk_tcp_conn_finish(struct mtk_tcp_conn *c,
 				enum mtk_tcp_cb_status status);
 static void mtk_tcp_conn_reap(void);
+static void mtk_tcp_rexmit_init(struct mtk_tcp_conn *c);
 
 static LIST_HEAD(listen_head);
 static LIST_HEAD(conn_head);
@@ -788,7 +790,14 @@ bool mtk_receive_tcp(struct ip_hdr *ip, int len, struct ethernet_hdr *et)
 	case ESTABLISHED:
 		/* Update window */
 		tmp = ntohs(tcp->wnd) << c->peer_ws;
-		if (tmp > c->mss && tmp > c->peer_wnd)
+		/* Advertised window starts at ACK, not at our next send SEQ.
+		 * Do not count already outstanding bytes as fresh capacity. */
+		if (mtk_tcp_seq_sub(c->local_seq, ack) > 0) {
+			u32 in_flight = mtk_tcp_seq_sub(c->local_seq, ack);
+
+			tmp = tmp > in_flight ? tmp - in_flight : 0;
+		}
+		if (tmp)
 			c->zw_mode = 0;
 		c->peer_wnd = tmp;
 
@@ -822,9 +831,13 @@ bool mtk_receive_tcp(struct ip_hdr *ip, int len, struct ethernet_hdr *et)
 		}
 
 		if (mtk_tcp_seq_sub(ack, c->local_seq_acked) > 0) {
-			/* clear retransmission state */
-			c->rexmit_mode = 0;
+			/* Keep recovering consecutive missing segments until the old
+			 * flight is ACKed. Otherwise every segment after a loss waits
+			 * another (exponentially growing) RTO, stalling large assets. */
+			c->rexmit_mode = mtk_tcp_continue_recovery(c->rexmit_mode,
+				c->local_seq, ack);
 			c->rexmit_wait_ack = 0;
+			mtk_tcp_rexmit_init(c);
 
 			/* The peer has ACKed new data */
 			c->local_seq_acked = ack;
@@ -852,8 +865,8 @@ bool mtk_receive_tcp(struct ip_hdr *ip, int len, struct ethernet_hdr *et)
 			 * If the peer ACKed the data chunk we've already
 			 * fully sent, just ignore it
 			 */
-			if (mtk_tcp_seq_sub(ack, c->local_seq_last) < 0)
-				break;
+			if (mtk_tcp_seq_sub(ack, c->local_seq_acked) < 0)
+				goto check_new_data;
 
 			/* Currently no more unACKed data */
 			if (c->local_seq == c->local_seq_acked)
@@ -1115,10 +1128,10 @@ static void mtk_tcp_conn_check(struct mtk_tcp_conn *c)
 			if (c->txlen > datalen_sent) {
 				/* There is still data to be sent */
 				data = c->tx + datalen_sent;
-				datalen = min(c->txlen - datalen_sent,
-					      (u32)c->mss);
+				datalen = mtk_tcp_payload_budget(c->txlen - datalen_sent,
+					c->mss, c->peer_wnd, datalen_sent - datalen_acked);
 
-				if (datalen >= c->peer_wnd) {
+				if (!c->peer_wnd) {
 					/* The peer may be zero-window */
 					if (!c->zw_mode)
 						mtk_tcp_rexmit_init(c);
@@ -1126,7 +1139,7 @@ static void mtk_tcp_conn_check(struct mtk_tcp_conn *c)
 					c->zw_mode = 1;
 					/* And send no data */
 					datalen = 0;
-				} else {
+				} else if (datalen) {
 					c->local_seq += datalen;
 					c->peer_wnd -= datalen;
 					c->ack_flag++;
@@ -1134,8 +1147,9 @@ static void mtk_tcp_conn_check(struct mtk_tcp_conn *c)
 						flags |= MTK_TCP_PSH;
 					mtk_tcp_rexmit_init(c);
 				}
-			} else if (c->txlen > datalen_acked) {
-				/* There is data to be ACKed */
+			}
+			if (!datalen && !c->zw_mode && datalen_sent > datalen_acked) {
+				/* Also check timeout when the bounded flight is full. */
 				switch (mtk_tcp_rexmit_check(c, &cbd)) {
 				case -1:
 					return;

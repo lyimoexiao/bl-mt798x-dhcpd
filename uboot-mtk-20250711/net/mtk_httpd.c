@@ -810,12 +810,14 @@ static void httpd_tx(struct httpd_instance *inst, struct mtk_tcp_cb_data *cbd)
 	struct httpd_response *resp = &pdata->response;
 
 	if (resp->status == HTTP_RESP_STD) {
-		if (pdata->resp_std_cnt == 0) {
-			/* send response payload */
-			mtk_tcp_send_data(cbd->conn, pdata->response.data,
-				      pdata->response.size);
+		if (pdata->resp_std_cnt < resp->size) {
+			/* Keep each TCP send buffer bounded. This is still one HTTP
+			 * body (and one gzip stream), not HTTP chunked encoding. */
+			u32 size = min(resp->size - pdata->resp_std_cnt, 16U * 1024);
 
-			pdata->resp_std_cnt = 1;
+			if (!mtk_tcp_send_data(cbd->conn,
+				resp->data + pdata->resp_std_cnt, size))
+				pdata->resp_std_cnt += size;
 		} else {
 			mtk_tcp_close_conn(cbd->conn, 0);
 			pdata->status = HTTPD_S_CLOSING;

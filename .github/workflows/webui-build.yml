@@ -7,6 +7,8 @@ on:
       - 'webui/**'
       - 'uboot-mtk-20250711/failsafe/**'
       - 'uboot-mtk-20250711/include/failsafe/**'
+      - 'uboot-mtk-20250711/net/mtk_tcp*'
+      - 'uboot-mtk-20250711/net/mtk_httpd.c'
       - '.github/workflows/webui-build.yml'
 
 permissions:
@@ -29,6 +31,8 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+          cc -Wall -Wextra -Werror tests/tcp-policy.c -o /tmp/tcp-policy
+          /tmp/tcp-policy
           npx playwright install --with-deps chromium
           npm run dev > /tmp/webui-vite.log 2>&1 &
           VITE_PID=$!
@@ -39,6 +43,7 @@ jobs:
           node scripts/transfer-check.mjs
           node scripts/parity-check.mjs
           npm run embed
+          node scripts/lazy-build-check.mjs
       - name: Upload generated frontend and screenshots
         uses: actions/upload-artifact@v4
         with:
